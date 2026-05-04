@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ICCID格式化工具</title>
+  <!-- 引入飞书开放平台SDK -->
+  <script src="https://lf3-static.bytednsdoc.com/obj/eden-cn/ptlz_zlp/ljhwZthlaukjlkulzlp/bitable-web-sdk/bitable-web-sdk.umd.js"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    
+    .container {
+      padding: 20px;
+      max-width: 400px;
+      margin: 0 auto;
+    }
+    
+    .title {
+      font-size: 18px;
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+    
+    .form-group {
+      margin-bottom: 16px;
+    }
+    
+    label {
+      display: block;
+      font-size: 14px;
+      color: #666;
+      margin-bottom: 8px;
+    }
+    
+    select, button {
+      width: 100%;
+      height: 40px;
+      padding: 0 12px;
+      border: 1px solid #e5e6eb;
+      border-radius: 4px;
+      font-size: 14px;
+      outline: none;
+    }
+    
+    select:focus {
+      border-color: #0066ff;
+    }
+    
+    button {
+      background: #0066ff;
+      color: white;
+      border: none;
+      cursor: pointer;
+      font-weight: 500;
+      transition: background 0.2s;
+    }
+    
+    button:hover {
+      background: #0058e6;
+    }
+    
+    button:disabled {
+      background: #c9cdd4;
+      cursor: not-allowed;
+    }
+    
+    .result {
+      margin-top: 20px;
+      padding: 12px;
+      border-radius: 4px;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    
+    .success {
+      background: #e8f4ff;
+      color: #0066ff;
+      border: 1px solid #bbdcff;
+    }
+    
+    .error {
+      background: #fff1f0;
+      color: #f53f3f;
+      border: 1px solid #ffcece;
+    }
+    
+    .tip {
+      font-size: 12px;
+      color: #999;
+      margin-top: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="title">ICCID格式化工具</div>
+    
+    <div class="form-group">
+      <label>选择ICCID所在列</label>
+      <select id="columnSelect">
+        <option value="">加载中...</option>
+      </select>
+      <div class="tip">仅支持文本/数字类型列</div>
+    </div>
+
+    <button id="formatBtn" disabled>格式化选中单元格ICCID</button>
+    
+    <div id="result" class="result" style="display: none;"></div>
+  </div>
+
+  <script>
+    // 初始化飞书多维表格SDK
+    const { bitable } = window;
+    let currentTable;
+    let allFields = [];
+
+    // 初始化页面
+    window.onload = async function() {
+      await initPlugin();
+    };
+
+    // 插件初始化
+    async function initPlugin() {
+      try {
+        // 获取当前数据表
+        currentTable = await bitable.base.getActiveTable();
+        // 获取所有字段
+        allFields = await currentTable.getFieldList();
+        // 渲染列选择器
+        renderColumnSelect();
+        // 启用按钮
+        document.getElementById('formatBtn').disabled = false;
+        document.getElementById('columnSelect').innerHTML = '<option value="">请选择ICCID列</option>';
+      } catch (error) {
+        showResult('初始化失败：' + error.message, 'error');
+      }
+    }
+
+    // 渲染列选择下拉框
+    function renderColumnSelect() {
+      const select = document.getElementById('columnSelect');
+      // 过滤文本和数字类型字段
+      const validFields = allFields.filter(field => 
+        field.type === 1 || field.type === 2 // 1=文本 2=数字
+      );
+
+      validFields.forEach(field => {
+        const option = document.createElement('option');
+        option.value = field.id;
+        option.textContent = field.name;
+        select.appendChild(option);
+      });
+    }
+
+    // ✅ 修正后的 ICCID 核心校验规则
+    function validateICCID(iccid) {
+      // 1. 清理：去除所有空格、换行、特殊字符
+      let cleanStr = String(iccid).trim().replace(/\s/g, '').toUpperCase();
+      
+      // 2. 长度必须 = 20位
+      if (cleanStr.length !== 20) {
+        return { valid: false, message: '长度必须为20位' };
+      }
+
+      // 3. 格式规则：前19位纯数字，最后1位可 数字/大写字母(A-F)
+      const regex = /^[0-9]{19}[0-9A-F]$/;
+      if (!regex.test(cleanStr)) {
+        return { valid: false, message: '格式错误：前19位必须是数字，最后1位可为数字/A-F' };
+      }
+
+      // 4. 校验运营商标准前缀（前6位）
+      const validPrefixes = [
+        '898600', '898602', '898604', '898607', // 中国移动
+        '898601', '898606', '898609', // 中国联通
+        '898603', '898611' // 中国电信
+      ];
+      const prefix = cleanStr.substring(0, 6);
+      if (!validPrefixes.includes(prefix)) {
+        return { valid: false, message: '运营商前缀不合法' };
+      }
+
+      return { valid: true, cleanStr };
+    }
+
+    // ICCID格式化：每4位加空格
+    function formatICCID(iccid) {
+      return iccid.replace(/(\d{4})(?=\d)/g, '$1 ');
+    }
+
+    // 显示结果提示
+    function showResult(text, type) {
+      const result = document.getElementById('result');
+      result.style.display = 'block';
+      result.className = `result ${type}`;
+      result.textContent = text;
+    }
+
+    // 格式化按钮点击事件
+    document.getElementById('formatBtn').addEventListener('click', async () => {
+      const fieldId = document.getElementById('columnSelect').value;
+      if (!fieldId) {
+        showResult('请选择ICCID所在列', 'error');
+        return;
+      }
+
+      try {
+        // 获取选中的单元格
+        const selection = await bitable.selection.getSelection();
+        if (!selection || !selection.recordIds || selection.recordIds.length === 0) {
+          showResult('请选中需要格式化的单元格', 'error');
+          return;
+        }
+
+        let successCount = 0;
+        let errorCount = 0;
+        const recordIds = selection.recordIds;
+
+        // 批量处理选中记录
+        for (const recordId of recordIds) {
+          // 获取单元格原始值
+          const record = await currentTable.getRecord(recordId);
+          const originalValue = record.fields[fieldId] || '';
+          
+          if (!originalValue) {
+            errorCount++;
+            continue;
+          }
+
+          // 校验ICCID
+          const validateResult = validateICCID(originalValue);
+          if (!validateResult.valid) {
+            errorCount++;
+            continue;
+          }
+
+          // 格式化ICCID
+          const formattedValue = formatICCID(validateResult.cleanStr);
+          
+          // 更新单元格值
+          await currentTable.setRecord(recordId, {
+            [fieldId]: formattedValue
+          });
+          
+          successCount++;
+        }
+
+        // 显示处理结果
+        if (successCount > 0) {
+          showResult(`处理完成：成功 ${successCount} 条，失败 ${errorCount} 条`, 'success');
+        } else {
+          showResult(`处理失败：所有选中内容均不符合ICCID标准`, 'error');
+        }
+
+      } catch (error) {
+        showResult('处理异常：' + error.message, 'error');
+      }
+    });
+  </script>
+</body>
+</html>
